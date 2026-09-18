@@ -201,7 +201,7 @@ export default function Home() {
   };
 
   const completeAttempt = useCallback(() => {
-    if (!attemptToken || !hasReturned || !activeMissionId) return;
+    if (!attemptToken || !activeMissionId) return;
     setClaimError(null);
     completeAttemptMutation.mutate({ token: attemptToken }, {
       onSuccess: async (result) => {
@@ -289,7 +289,7 @@ export default function Home() {
   };
 
   const handleClaimMission = (mission: Mission) => {
-    if (missionState[mission.id] !== "opened" || countdown > 0 || !hasReturned) return;
+    if (missionState[mission.id] !== "opened" || countdown > 0) return;
     completeAttempt();
   };
 
