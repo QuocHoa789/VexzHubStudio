@@ -4,7 +4,7 @@ export const LINK_WAIT_SECONDS = 8;
 
 export const LINK4SUB_LEVEL_1_URL = "https://link4sub.com/FhoKDghRKt";
 export const LINK4SUB_LEVEL_2_URL = "https://link4sub.com/CzJAqmN7dl";
-export const LINK4M_URL = "https://link4m.co/st?api=6aaa2d910aef892dca0a0bf8&url=https://lumen-dash-6t6qdyoe.manus.space/";
+export const LINK4M_URL = "https://link4m.co/st?api=6aaa2d910aef892dca0a0bf8&url=https://lumenrewards-8fsahncj.manus.space";
 
 export type RewardTier = "level1" | "level2" | "link4m";
 

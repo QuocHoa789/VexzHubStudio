@@ -85,7 +85,7 @@ export async function startRewardAttempt(userId: number, tier: RewardTier) {
   if (!db) throw new Error("Database is not available");
   const token = `${randomUUID()}-${randomUUID()}`;
   const [attempt] = await db.insert(rewardAttempts).values({ userId, tier, token }).$returningId();
-  const returnUrl = process.env.REWARD_RETURN_URL || "https://lumen-dash-6t6qdyoe.manus.space/";
+  const returnUrl = process.env.REWARD_RETURN_URL || "https://lumenrewards-8fsahncj.manus.space";
   const callbackUrl = `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}reward_token=${encodeURIComponent(token)}`;
   const baseUrl = REWARD_TIERS[tier].url;
   const url = tier === "link4m"
