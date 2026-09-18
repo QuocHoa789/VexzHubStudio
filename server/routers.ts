@@ -12,17 +12,17 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    emailSignup: publicProcedure.input(z.object({ name: z.string().min(2).max(80), email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
-      const result = await createEmailUser(input.name, input.email, input.password);
+    signup: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), username: z.string().trim().min(3).max(80).regex(/^[a-zA-Z0-9_]+$/), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+      const result = await createEmailUser(input.name, input.username, input.password);
       if (!result.ok) return result;
       const token = await sdk.signSession({ openId: result.user.openId, appId: "local-email", name: result.user.name || input.name });
       ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: 1000 * 60 * 60 * 24 * 365 });
       return { ok: true as const };
     }),
-    emailLogin: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
-      const user = await authenticateEmailUser(input.email, input.password);
+    login: publicProcedure.input(z.object({ username: z.string().trim().min(3).max(80).regex(/^[a-zA-Z0-9_]+$/), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+      const user = await authenticateEmailUser(input.username, input.password);
       if (!user) return { ok: false as const, reason: "invalid_credentials" as const };
-      const token = await sdk.signSession({ openId: user.openId, appId: "local-email", name: user.name || input.email });
+      const token = await sdk.signSession({ openId: user.openId, appId: "local-email", name: user.name || input.username });
       ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: 1000 * 60 * 60 * 24 * 365 });
       return { ok: true as const };
     }),
