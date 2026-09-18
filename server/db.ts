@@ -139,10 +139,10 @@ export async function markRewardAttemptReturned(userId: number, token: string) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const [attempt] = await db.select().from(rewardAttempts).where(and(eq(rewardAttempts.userId, userId), eq(rewardAttempts.token, token))).limit(1);
-  if (!attempt || attempt.completedAt) return { returned: false, reason: "invalid_attempt" as const };
-  await db.update(rewardAttempts).set({ returnedAt: new Date() }).where(eq(rewardAttempts.id, attempt.id));
-  const completion = await completeRewardAttempt(userId, token, true);
-  return { ...completion, returned: true, reason: "returned" as const };
+  const [user] = await db.select({ coinBalance: users.coinBalance }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!attempt) return { returned: false, reason: "invalid_attempt" as const, accepted: false, balance: user?.coinBalance ?? 0 };
+  if (attempt.completedAt) return { returned: Boolean(attempt.returnedAt), reason: "already_completed" as const, accepted: Boolean(attempt.returnedAt), claimed: false, reward: REWARD_TIERS[attempt.tier].reward, balance: user?.coinBalance ?? 0 };
+  return { returned: false, reason: "provider_confirmation_required" as const, accepted: false, claimed: false, reward: REWARD_TIERS[attempt.tier].reward, balance: user?.coinBalance ?? 0 };
 }
 
 export async function cancelRewardAttempt(userId: number, token: string) {
@@ -185,8 +185,9 @@ export async function completeRewardAttempt(userId: number, token: string, verif
 export async function completeVerifiedRewardAttempt(token: string) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const [attempt] = await db.select({ userId: rewardAttempts.userId }).from(rewardAttempts).where(eq(rewardAttempts.token, token)).limit(1);
+  const [attempt] = await db.select({ id: rewardAttempts.id, userId: rewardAttempts.userId }).from(rewardAttempts).where(eq(rewardAttempts.token, token)).limit(1);
   if (!attempt) return { claimed: false, accepted: false, reason: "invalid_attempt" as const, balance: 0 };
+  await db.update(rewardAttempts).set({ returnedAt: new Date() }).where(and(eq(rewardAttempts.id, attempt.id), sql`${rewardAttempts.completedAt} IS NULL`));
   return completeRewardAttempt(attempt.userId, token, true);
 }
 
@@ -196,22 +197,25 @@ export async function getLeaderboard(limit = 20) {
   return db.select({ id: users.id, name: users.name, coinBalance: users.coinBalance, createdAt: users.createdAt }).from(users).orderBy(desc(users.coinBalance), users.createdAt).limit(limit);
 }
 
-export async function getAdminOverview() {
+export async function getAdminOverview(filters: { date?: string; tier?: RewardTier } = {}) {
   const db = await getDb();
   if (!db) return { metrics: { totalUsers: 0, totalCoins: 0, totalClaims: 0, openAttempts: 0, flaggedUsers: 0 }, claims: [], fraudSignals: [], attemptStats: { success: 0, failed: 0, open: 0, successRate: 0 } };
   const [userStats] = await db.select({ totalUsers: count(users.id), totalCoins: sum(users.coinBalance) }).from(users);
   const [claimStats] = await db.select({ totalClaims: count(coinTransactions.id) }).from(coinTransactions);
-  const claims = await db.select({ id: coinTransactions.id, userId: coinTransactions.userId, userName: users.name, userEmail: users.email, amount: coinTransactions.amount, source: coinTransactions.source, claimKey: coinTransactions.claimKey, createdAt: coinTransactions.createdAt }).from(coinTransactions).innerJoin(users, eq(users.id, coinTransactions.userId)).orderBy(desc(coinTransactions.createdAt)).limit(40);
-  const attempts = await db.select({ id: rewardAttempts.id, userId: rewardAttempts.userId, userName: users.name, userEmail: users.email, tier: rewardAttempts.tier, token: rewardAttempts.token, startedAt: rewardAttempts.startedAt, returnedAt: rewardAttempts.returnedAt, completedAt: rewardAttempts.completedAt }).from(rewardAttempts).innerJoin(users, eq(users.id, rewardAttempts.userId)).orderBy(desc(rewardAttempts.startedAt)).limit(150);
+  const claims = await db.select({ id: coinTransactions.id, userId: coinTransactions.userId, userName: users.name, userEmail: users.email, amount: coinTransactions.amount, source: coinTransactions.source, claimKey: coinTransactions.claimKey, createdAt: coinTransactions.createdAt }).from(coinTransactions).innerJoin(users, eq(users.id, coinTransactions.userId)).orderBy(desc(coinTransactions.createdAt)).limit(500);
+  const attempts = await db.select({ id: rewardAttempts.id, userId: rewardAttempts.userId, userName: users.name, userEmail: users.email, tier: rewardAttempts.tier, token: rewardAttempts.token, startedAt: rewardAttempts.startedAt, returnedAt: rewardAttempts.returnedAt, completedAt: rewardAttempts.completedAt }).from(rewardAttempts).innerJoin(users, eq(users.id, rewardAttempts.userId)).orderBy(desc(rewardAttempts.startedAt)).limit(500);
+  const matchesFilter = (date: Date | string | null, tier?: RewardTier, rowTier?: RewardTier) => (!filters.date || (date && new Date(date).toISOString().slice(0, 10) === filters.date)) && (!filters.tier || rowTier === filters.tier);
+  const filteredClaims = claims.filter((claim) => matchesFilter(claim.createdAt, filters.tier, claim.source === "link4m" ? "link4m" : claim.source === "layma" ? "layma" : (claim.claimKey.split(":")[1] as RewardTier)));
+  const filteredAttempts = attempts.filter((attempt) => matchesFilter(attempt.startedAt, filters.tier, attempt.tier));
   const now = Date.now();
-  const recent = attempts.filter((attempt) => now - new Date(attempt.startedAt).getTime() <= 15 * 60 * 1000);
+  const recent = filteredAttempts.filter((attempt) => now - new Date(attempt.startedAt).getTime() <= 15 * 60 * 1000);
   const counts = new Map<number, number>();
   recent.forEach((attempt) => counts.set(attempt.userId, (counts.get(attempt.userId) ?? 0) + 1));
   const incompleteCounts = new Map<number, number>();
-  attempts.filter((attempt) => !attempt.completedAt && now - new Date(attempt.startedAt).getTime() <= 24 * 60 * 60 * 1000).forEach((attempt) => incompleteCounts.set(attempt.userId, (incompleteCounts.get(attempt.userId) ?? 0) + 1));
-  const fraudSignals = attempts.filter((attempt) => (counts.get(attempt.userId) ?? 0) >= 4 || (incompleteCounts.get(attempt.userId) ?? 0) >= 3).slice(0, 30).map((attempt) => ({ id: attempt.id, userId: attempt.userId, userName: attempt.userName || "Lumen member", userEmail: attempt.userEmail || "", tier: attempt.tier, startedAt: attempt.startedAt, completed: Boolean(attempt.completedAt), signal: (counts.get(attempt.userId) ?? 0) >= 4 ? "Nhiều attempt trong 15 phút" : "Nhiều attempt chưa hoàn tất trong 24 giờ" }));
-  const success = attempts.filter((attempt) => Boolean(attempt.completedAt && attempt.returnedAt)).length;
-  const failed = attempts.filter((attempt) => Boolean(attempt.completedAt && !attempt.returnedAt)).length;
-  const open = attempts.filter((attempt) => !attempt.completedAt).length;
-  return { metrics: { totalUsers: Number(userStats?.totalUsers ?? 0), totalCoins: Number(userStats?.totalCoins ?? 0), totalClaims: Number(claimStats?.totalClaims ?? 0), openAttempts: open, flaggedUsers: new Set(fraudSignals.map((signal) => signal.userId)).size }, claims, fraudSignals, attemptStats: { success, failed, open, successRate: success + failed ? Math.round((success / (success + failed)) * 100) : 0 } };
+  filteredAttempts.filter((attempt) => !attempt.completedAt && now - new Date(attempt.startedAt).getTime() <= 24 * 60 * 60 * 1000).forEach((attempt) => incompleteCounts.set(attempt.userId, (incompleteCounts.get(attempt.userId) ?? 0) + 1));
+  const fraudSignals = filteredAttempts.filter((attempt) => (counts.get(attempt.userId) ?? 0) >= 4 || (incompleteCounts.get(attempt.userId) ?? 0) >= 3).slice(0, 30).map((attempt) => ({ id: attempt.id, userId: attempt.userId, userName: attempt.userName || "Lumen member", userEmail: attempt.userEmail || "", tier: attempt.tier, startedAt: attempt.startedAt, completed: Boolean(attempt.completedAt), signal: (counts.get(attempt.userId) ?? 0) >= 4 ? "Nhiều attempt trong 15 phút" : "Nhiều attempt chưa hoàn tất trong 24 giờ" }));
+  const success = filteredAttempts.filter((attempt) => Boolean(attempt.completedAt && attempt.returnedAt)).length;
+  const failed = filteredAttempts.filter((attempt) => Boolean(attempt.completedAt && !attempt.returnedAt)).length;
+  const open = filteredAttempts.filter((attempt) => !attempt.completedAt).length;
+  return { metrics: { totalUsers: Number(userStats?.totalUsers ?? 0), totalCoins: Number(userStats?.totalCoins ?? 0), totalClaims: filters.date || filters.tier ? filteredClaims.length : Number(claimStats?.totalClaims ?? 0), openAttempts: open, flaggedUsers: new Set(fraudSignals.map((signal) => signal.userId)).size }, claims: filteredClaims.slice(0, 40), fraudSignals, attemptStats: { success, failed, open, successRate: success + failed ? Math.round((success / (success + failed)) * 100) : 0 } };
 }

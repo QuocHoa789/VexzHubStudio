@@ -59,7 +59,7 @@ export const appRouter = router({
       }),
   }),
   admin: router({
-    overview: adminProcedure.query(() => getAdminOverview()),
+    overview: adminProcedure.input(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), tier: z.enum(["level1", "level2", "link4m", "layma"]).optional() }).optional()).query(({ input }) => getAdminOverview(input ?? {})),
   }),
 });
 
