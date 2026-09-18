@@ -116,6 +116,7 @@ export default function Home() {
   const leaderboardQuery = trpc.rewards.leaderboard.useQuery(leaderboardInput, { enabled: Boolean(user), retry: false });
   const startAttemptMutation = trpc.rewards.startAttempt.useMutation();
   const markReturnedMutation = trpc.rewards.markReturned.useMutation();
+  const cancelAttemptMutation = trpc.rewards.cancelAttempt.useMutation();
   const completeAttemptMutation = trpc.rewards.completeAttempt.useMutation();
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -136,6 +137,7 @@ export default function Home() {
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [activityExpanded, setActivityExpanded] = useState(false);
+  const [cooldowns, setCooldowns] = useState<Record<RewardTier, number>>({ level1: 0, level2: 0, link4m: 0 });
 
   useEffect(() => {
     if (!user) return;
@@ -173,6 +175,17 @@ export default function Home() {
     const timerId = window.setTimeout(() => setCountdown((value) => Math.max(0, value - 1)), 1000);
     return () => window.clearTimeout(timerId);
   }, [activeMissionId, countdown]);
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => {
+      setCooldowns((current) => {
+        const now = Date.now();
+        const next = Object.fromEntries(Object.entries(current).filter(([, until]) => until > now)) as Record<RewardTier, number>;
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+    }, 500);
+    return () => window.clearInterval(timerId);
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -270,8 +283,10 @@ export default function Home() {
     };
   }, []);
 
+  const cooldownSeconds = (tier: RewardTier) => Math.ceil(Math.max(0, (cooldowns[tier] ?? 0) - Date.now()) / 1000);
+
   const handleStartMission = (mission: Mission) => {
-    if (rewardsQuery.data?.todayClaimedByTier[mission.tier] || startAttemptMutation.isPending || activeMissionId) return;
+    if (rewardsQuery.data?.todayClaimedByTier[mission.tier] || startAttemptMutation.isPending || activeMissionId || cooldownSeconds(mission.tier) > 0) return;
     setClaimError(null);
     setHasReturned(false);
     leftPageRef.current = false;
@@ -294,6 +309,17 @@ export default function Home() {
   const handleClaimMission = (mission: Mission) => {
     if (missionState[mission.id] !== "opened" || countdown > 0) return;
     completeAttempt();
+  };
+
+  const handleFailedMission = () => {
+    if (!activeMissionId || !selectedTier) return;
+    if (attemptToken) void cancelAttemptMutation.mutateAsync({ token: attemptToken });
+    setCooldowns((current) => ({ ...current, [selectedTier]: Date.now() + 10_000 }));
+    setClaimError("Link này chưa vượt thành công. Đã cooldown 10 giây; bạn có thể tiếp tục 2 link còn lại.");
+    setMissionState((current) => ({ ...current, [activeMissionId]: "ready" }));
+    setActiveMissionId(null);
+    setAttemptToken(null);
+    window.sessionStorage.removeItem(`lumen:reward-attempt:${user?.id}`);
   };
 
 
@@ -374,7 +400,7 @@ export default function Home() {
           </section>
 
           <section className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.8fr)]">
-            <div className="rounded-2xl border border-white/[0.075] bg-white/[0.032] p-5 sm:p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><p className="font-display text-[15px] font-semibold tracking-[-0.02em] text-white">Today’s missions</p><span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">{missions.length} available</span></div><p className="mt-1.5 text-[11px] text-slate-600">Complete simple actions and collect coins automatically.</p></div><button onClick={() => setActivityExpanded((value) => !value)} className="text-[11px] font-semibold text-violet-300 transition-colors hover:text-white">{activityExpanded ? "Show less" : "View rules"}</button></div>{activityExpanded && <div className="mt-4 rounded-xl border border-violet-300/10 bg-violet-300/[0.04] p-3 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mr-1.5 inline h-3.5 w-3.5 text-violet-300" /> Open the partner link, complete the short step, return here, and coins will be added automatically.</div>}{claimError && <p className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.05] p-2 text-[10px] text-rose-200">{claimError}</p>}<div className="mt-5 space-y-2">{missions.map((mission) => {const Icon = mission.icon; const status = missionState[mission.id] ?? mission.status; const isActive = mission.id === activeMissionId; const isWaiting = status === "opened" && isActive && countdown > 0; return <div key={mission.id} className={`group flex flex-col gap-4 rounded-2xl border p-4 transition-all duration-200 sm:flex-row sm:items-center ${status === "claimed" ? "border-emerald-300/10 bg-emerald-300/[0.025]" : isActive ? "border-white/[0.1] bg-white/[0.035]" : "border-white/[0.06] bg-white/[0.018]"}`}><div className={`mission-icon mission-${mission.tone}`}><Icon className="h-4 w-4" strokeWidth={1.8} /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[12px] font-semibold text-white">{mission.title}</p>{status === "claimed" && <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">DONE</span>}</div><p className="mt-1 text-[10px] text-slate-600">{mission.description}</p></div><div className="flex flex-wrap items-center gap-2 sm:ml-auto"><span className="whitespace-nowrap text-[11px] font-bold text-violet-200">+{mission.reward} <span className="font-medium text-slate-600">coins</span></span>{status === "claimed" ? <span className="flex h-9 items-center gap-1.5 rounded-xl bg-emerald-400/10 px-3 text-[10px] font-bold text-emerald-300"><Check className="h-3.5 w-3.5" /> Auto credited</span> : status === "opened" && !isWaiting ? <span className="flex h-9 items-center gap-1.5 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] px-3 text-[10px] font-semibold text-amber-200"><TimerReset className="h-3.5 w-3.5" /> Return to auto-credit</span> : <button onClick={() => handleStartMission(mission)} disabled={Boolean(activeMissionId) || isWaiting} className={`flex h-9 items-center gap-1.5 rounded-xl px-3 text-[10px] font-bold transition-all ${activeMissionId || isWaiting ? "border border-white/[0.08] bg-white/[0.03] text-slate-600" : "bg-white text-[#0c0d12] hover:bg-violet-100"}`}>{isWaiting ? <><TimerReset className="h-3.5 w-3.5 animate-pulse" /> Wait {countdown}s</> : <><ExternalLink className="h-3.5 w-3.5" /> Open link</>}</button>}</div></div>;})}</div></div>
+            <div className="rounded-2xl border border-white/[0.075] bg-white/[0.032] p-5 sm:p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><p className="font-display text-[15px] font-semibold tracking-[-0.02em] text-white">Today’s missions</p><span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">{missions.length} available</span></div><p className="mt-1.5 text-[11px] text-slate-600">Complete simple actions and collect coins automatically.</p></div><button onClick={() => setActivityExpanded((value) => !value)} className="text-[11px] font-semibold text-violet-300 transition-colors hover:text-white">{activityExpanded ? "Show less" : "View rules"}</button></div>{activityExpanded && <div className="mt-4 rounded-xl border border-violet-300/10 bg-violet-300/[0.04] p-3 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mr-1.5 inline h-3.5 w-3.5 text-violet-300" /> Open the partner link, complete the short step, return here, and coins will be added automatically.</div>}{claimError && <p className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.05] p-2 text-[10px] text-rose-200">{claimError}</p>}{activeMissionId && countdown === 0 && <button onClick={handleFailedMission} className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[10px] font-semibold text-amber-200 hover:bg-amber-300/[0.1]">Link không thành công? Bỏ qua link này trong 10 giây</button>}<div className="mt-5 space-y-2">{missions.map((mission) => {const Icon = mission.icon; const status = missionState[mission.id] ?? mission.status; const isActive = mission.id === activeMissionId; const isWaiting = status === "opened" && isActive && countdown > 0; return <div key={mission.id} className={`group flex flex-col gap-4 rounded-2xl border p-4 transition-all duration-200 sm:flex-row sm:items-center ${status === "claimed" ? "border-emerald-300/10 bg-emerald-300/[0.025]" : isActive ? "border-white/[0.1] bg-white/[0.035]" : "border-white/[0.06] bg-white/[0.018]"}`}><div className={`mission-icon mission-${mission.tone}`}><Icon className="h-4 w-4" strokeWidth={1.8} /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[12px] font-semibold text-white">{mission.title}</p>{status === "claimed" && <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">DONE</span>}</div><p className="mt-1 text-[10px] text-slate-600">{mission.description}</p></div><div className="flex flex-wrap items-center gap-2 sm:ml-auto"><span className="whitespace-nowrap text-[11px] font-bold text-violet-200">+{mission.reward} <span className="font-medium text-slate-600">coins</span></span>{status === "claimed" ? <span className="flex h-9 items-center gap-1.5 rounded-xl bg-emerald-400/10 px-3 text-[10px] font-bold text-emerald-300"><Check className="h-3.5 w-3.5" /> Auto credited</span> : status === "opened" && !isWaiting ? <span className="flex h-9 items-center gap-1.5 rounded-xl border border-amber-300/15 bg-amber-300/[0.05] px-3 text-[10px] font-semibold text-amber-200"><TimerReset className="h-3.5 w-3.5" /> Return to auto-credit</span> : <button onClick={() => handleStartMission(mission)} disabled={Boolean(activeMissionId) || isWaiting} className={`flex h-9 items-center gap-1.5 rounded-xl px-3 text-[10px] font-bold transition-all ${activeMissionId || isWaiting ? "border border-white/[0.08] bg-white/[0.03] text-slate-600" : "bg-white text-[#0c0d12] hover:bg-violet-100"}`}>{isWaiting ? <><TimerReset className="h-3.5 w-3.5 animate-pulse" /> Wait {countdown}s</> : <><ExternalLink className="h-3.5 w-3.5" /> Open link</>}</button>}</div></div>;})}</div></div>
 
             <div className="rounded-2xl border border-white/[0.075] bg-white/[0.032] p-5 sm:p-6"><div className="flex items-start justify-between"><div><p className="font-display text-[15px] font-semibold tracking-[-0.02em] text-white">Claim history</p><p className="mt-1.5 text-[11px] text-slate-600">Your latest coin activity</p></div><History className="h-4 w-4 text-slate-600" /></div><div className="mt-5 divide-y divide-white/[0.055]">{claims.slice(0, 4).map((claim) => <div key={claim.id} className="flex items-center gap-3 py-3 first:pt-0"><div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-violet-400/10 text-violet-300"><Coins className="h-3.5 w-3.5" /></div><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-slate-300">{claim.title}</p><p className="mt-1 text-[10px] text-slate-600">{claim.time}</p></div><span className="text-[11px] font-bold text-emerald-300">+{claim.reward}</span></div>)}</div><button onClick={() => selectNav("History")} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] py-2.5 text-[10px] font-semibold text-slate-500 transition-all hover:border-violet-300/25 hover:bg-violet-300/[0.04] hover:text-violet-200"><History className="h-3 w-3" /> View full history</button></div>
           </section>

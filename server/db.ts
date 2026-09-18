@@ -104,6 +104,13 @@ export async function markRewardAttemptReturned(userId: number, token: string) {
   return { ...completion, returned: true, reason: "returned" as const };
 }
 
+export async function cancelRewardAttempt(userId: number, token: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(rewardAttempts).set({ completedAt: new Date() }).where(and(eq(rewardAttempts.userId, userId), eq(rewardAttempts.token, token), sql`${rewardAttempts.completedAt} IS NULL`));
+  return { cancelled: true } as const;
+}
+
 export async function completeRewardAttempt(userId: number, token: string, verifiedExternally = false) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");

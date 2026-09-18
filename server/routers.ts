@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { getAdminOverview, getCoinDashboard, completeRewardAttempt, getLeaderboard, markRewardAttemptReturned, startRewardAttempt } from "./db";
+import { getAdminOverview, getCoinDashboard, completeRewardAttempt, cancelRewardAttempt, getLeaderboard, markRewardAttemptReturned, startRewardAttempt } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -25,6 +25,9 @@ export const appRouter = router({
     markReturned: protectedProcedure
       .input(z.object({ token: z.string().min(32).max(96) }))
       .mutation(({ ctx, input }) => markRewardAttemptReturned(ctx.user.id, input.token)),
+    cancelAttempt: protectedProcedure
+      .input(z.object({ token: z.string().min(32).max(96) }))
+      .mutation(({ ctx, input }) => cancelRewardAttempt(ctx.user.id, input.token)),
     completeAttempt: protectedProcedure
       .input(z.object({ token: z.string().min(32).max(96) }))
       .mutation(({ ctx, input }) => completeRewardAttempt(ctx.user.id, input.token)),
