@@ -140,23 +140,40 @@ export default function Home() {
   const [cooldowns, setCooldowns] = useState<Record<RewardTier, number>>({ level1: 0, level2: 0, link4m: 0 });
 
   useEffect(() => {
-    if (!user) return;
-    const returnedToken = new URLSearchParams(window.location.search).get("reward_token");
+    if (!user?.id) return;
+    const queryToken = new URLSearchParams(window.location.search).get("reward_token");
+    let saved: { token: string; tier: RewardTier; startedAt: number } | null = null;
+    const stored = window.sessionStorage.getItem(`lumen:reward-attempt:${user.id}`);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as { token: string; tier: RewardTier; startedAt: number };
+        if (parsed.token && REWARD_TIERS[parsed.tier]) saved = parsed;
+      } catch {
+        window.sessionStorage.removeItem(`lumen:reward-attempt:${user.id}`);
+      }
+    }
+    const returnedToken = queryToken || saved?.token;
     if (!returnedToken) return;
+    const returnedTier = saved?.tier ?? selectedTier;
     markReturnedMutation.mutate({ token: returnedToken }, {
       onSuccess: (result) => {
         if (result.returned) {
           setHasReturned(true);
+          setSelectedTier(returnedTier);
           if ("accepted" in result && result.accepted) {
             setCoins(result.balance);
-            if (result.claimed) setClaims((current) => [{ id: Date.now(), title: REWARD_TIERS[selectedTier].label, reward: result.reward ?? REWARD_TIERS[selectedTier].reward, time: "Just now" }, ...current]);
+            if (result.claimed) setClaims((current) => [{ id: Date.now(), title: REWARD_TIERS[returnedTier].label, reward: result.reward ?? REWARD_TIERS[returnedTier].reward, time: "Just now" }, ...current]);
+            setMissionState((current) => ({ ...current, [returnedTier === "link4m" ? "link4m" : `link4sub-${returnedTier}`]: "claimed" }));
+            setActiveMissionId(null);
+            setAttemptToken(null);
+            window.sessionStorage.removeItem(`lumen:reward-attempt:${user.id}`);
             void Promise.all([utils.rewards.dashboard.invalidate(), utils.rewards.leaderboard.invalidate()]);
           }
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       },
     });
-  }, [markReturnedMutation, user]);
+  }, [markReturnedMutation, selectedTier, user, utils]);
 
   useEffect(() => {
     if (!rewardsQuery.data) return;
