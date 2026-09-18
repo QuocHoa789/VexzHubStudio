@@ -236,8 +236,15 @@ export default function Home() {
     const timerId = window.setInterval(() => {
       setCooldowns((current) => {
         const now = Date.now();
-        const next = Object.fromEntries(Object.entries(current).filter(([, until]) => until > now)) as Record<RewardTier, number>;
-        return Object.keys(next).length === Object.keys(current).length ? current : next;
+        let changed = false;
+        const next = { ...current } as Record<RewardTier, number>;
+        (Object.keys(next) as RewardTier[]).forEach((tier) => {
+          if (next[tier] > 0 && next[tier] <= now) {
+            next[tier] = 0;
+            changed = true;
+          }
+        });
+        return changed ? next : current;
       });
     }, 500);
     return () => window.clearInterval(timerId);
