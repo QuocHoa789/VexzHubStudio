@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
 import { COIN_REWARD, LINK_WAIT_SECONDS, REWARD_TIERS } from "@/lib/rewards";
 import type { RewardTier } from "@shared/rewards";
 import { trpc } from "@/lib/trpc";
@@ -128,8 +127,8 @@ export default function Home() {
   const markReturnedMutation = trpc.rewards.markReturned.useMutation();
   const cancelAttemptMutation = trpc.rewards.cancelAttempt.useMutation();
   const completeAttemptMutation = trpc.rewards.completeAttempt.useMutation();
-  const emailLoginMutation = trpc.auth.emailLogin.useMutation();
-  const emailSignupMutation = trpc.auth.emailSignup.useMutation();
+  const loginMutation = trpc.auth.login.useMutation();
+  const signupMutation = trpc.auth.signup.useMutation();
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -152,18 +151,35 @@ export default function Home() {
   const [coinPopup, setCoinPopup] = useState<{ amount: number; label: string } | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authName, setAuthName] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
+  const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const handleEmailAuth = (event: FormEvent) => {
+  const handleAuth = (event: FormEvent) => {
     event.preventDefault();
     setAuthError(null);
-    if (authMode === "signup") {
-      emailSignupMutation.mutate({ name: authName, email: authEmail, password: authPassword }, { onSuccess: (result) => { if (result.ok) window.location.reload(); else setAuthError("Email này đã tồn tại hoặc không thể tạo tài khoản."); }, onError: () => setAuthError("Không thể tạo tài khoản. Mật khẩu cần tối thiểu 8 ký tự.") });
-    } else {
-      emailLoginMutation.mutate({ email: authEmail, password: authPassword }, { onSuccess: (result) => { if (!result.ok) setAuthError("Email hoặc mật khẩu không đúng."); else window.location.reload(); }, onError: () => setAuthError("Đăng nhập thất bại, vui lòng thử lại.") });
+    const username = authUsername.trim();
+    if (username.length < 3 || !/^[a-zA-Z0-9_]+$/.test(username)) {
+      setAuthError("Tên đăng nhập cần ít nhất 3 ký tự, chỉ gồm chữ, số hoặc dấu gạch dưới.");
+      return;
     }
+    if (authPassword.length < 8) {
+      setAuthError(`Mật khẩu hiện có ${authPassword.length} ký tự; cần ít nhất 8 ký tự.`);
+      return;
+    }
+    const mutation = authMode === "signup" ? signupMutation : loginMutation;
+    const input = authMode === "signup"
+      ? { name: authName.trim(), username, password: authPassword }
+      : { username, password: authPassword };
+    mutation.mutate(input as never, {
+      onSuccess: (result: any) => {
+        if (result.ok) window.location.reload();
+        else if (result.reason === "username_exists") setAuthError("Tên đăng nhập đã tồn tại.");
+        else if (result.reason === "database_unavailable") setAuthError("Server chưa kết nối database hoặc chưa chạy migration username.");
+        else setAuthError("Tên đăng nhập hoặc mật khẩu không đúng.");
+      },
+      onError: (error) => setAuthError(error.message || "Không thể kết nối máy chủ. Vui lòng thử lại.")
+    });
   };
   const [cooldowns, setCooldowns] = useState<Record<RewardTier, number>>({ level1: 0, level2: 0, link4m: 0, layma: 0 });
 
@@ -395,7 +411,7 @@ export default function Home() {
   }
 
   if (!user) {
-    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#08090d] px-5 text-slate-100"><div className="pointer-events-none absolute inset-0"><div className="aurora aurora-violet" /><div className="aurora aurora-cyan" /><div className="grid-noise absolute inset-0 opacity-[0.025]" /></div><div className="relative w-full max-w-md rounded-3xl border border-white/[0.1] bg-[#111219]/90 p-7 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-9"><div className="flex items-center gap-3"><div className="brand-mark flex h-10 w-10 items-center justify-center rounded-xl text-[#0b0c11]"><Sparkles className="h-5 w-5 fill-current" /></div><div><p className="font-display text-base font-bold text-white">lumen</p><p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-500">rewards system</p></div></div><div className="mt-10"><p className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Private rewards workspace</p><h1 className="font-display text-3xl font-semibold tracking-[-0.05em] text-white">Make every action count<span className="text-violet-300">.</span></h1><p className="mt-3 text-sm leading-relaxed text-slate-500">Đăng nhập để nhận coin và theo dõi lịch sử nhiệm vụ.</p></div><div className="mt-8 space-y-3"><button onClick={() => startLogin()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-[12px] font-bold text-[#0c0d12] transition-colors hover:bg-violet-100"><LogIn className="h-4 w-4" /> Tiếp tục với Google</button><div className="flex rounded-xl border border-white/[0.08] bg-white/[0.02] p-1"><button onClick={() => setAuthMode("login")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "login" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng nhập</button><button onClick={() => setAuthMode("signup")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "signup" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng ký</button></div><form onSubmit={handleEmailAuth} className="space-y-2">{authMode === "signup" && <input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Họ tên" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />}<input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" /><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Mật khẩu (tối thiểu 8 ký tự)" minLength={8} required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />{authError && <p className="text-[10px] text-rose-300">{authError}</p>}<button type="submit" className="flex h-11 w-full items-center justify-center rounded-xl bg-violet-300 text-[12px] font-bold text-[#14111e] hover:bg-violet-200">{authMode === "login" ? "Đăng nhập bằng email" : "Tạo tài khoản"}</button></form></div><p className="mt-6 text-center text-[10px] leading-relaxed text-slate-600">Google dùng Manus OAuth; email và mật khẩu được hash server-side.</p></div></div>;
+    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#08090d] px-5 text-slate-100"><div className="pointer-events-none absolute inset-0"><div className="aurora aurora-violet" /><div className="aurora aurora-cyan" /><div className="grid-noise absolute inset-0 opacity-[0.025]" /></div><div className="relative w-full max-w-md rounded-3xl border border-white/[0.1] bg-[#111219]/90 p-7 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-9"><div className="flex items-center gap-3"><div className="brand-mark flex h-10 w-10 items-center justify-center rounded-xl text-[#0b0c11]"><Sparkles className="h-5 w-5 fill-current" /></div><div><p className="font-display text-base font-bold text-white">lumen</p><p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-500">rewards system</p></div></div><div className="mt-10"><p className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Private rewards workspace</p><h1 className="font-display text-3xl font-semibold tracking-[-0.05em] text-white">Make every action count<span className="text-violet-300">.</span></h1><p className="mt-3 text-sm leading-relaxed text-slate-500">Đăng nhập để nhận coin và theo dõi lịch sử nhiệm vụ.</p></div><div className="mt-8 space-y-3"><div className="flex rounded-xl border border-white/[0.08] bg-white/[0.02] p-1"><button onClick={() => setAuthMode("login")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "login" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng nhập</button><button onClick={() => setAuthMode("signup")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "signup" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng ký</button></div><form onSubmit={handleAuth} className="space-y-2">{authMode === "signup" && <input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Họ tên" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />}<input type="text" value={authUsername} onChange={(event) => setAuthUsername(event.target.value)} placeholder="Tên đăng nhập" minLength={3} pattern="[A-Za-z0-9_]+" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" /><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Mật khẩu (tối thiểu 8 ký tự)" minLength={8} required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />{authError && <p className="text-[10px] text-rose-300">{authError}</p>}<button type="submit" className="flex h-11 w-full items-center justify-center rounded-xl bg-violet-300 text-[12px] font-bold text-[#14111e] hover:bg-violet-200">{authMode === "login" ? "Đăng nhập" : "Tạo tài khoản"}</button></form></div><p className="mt-6 text-center text-[10px] leading-relaxed text-slate-600">Tài khoản local: tên đăng nhập và mật khẩu được hash bảo mật trên máy chủ.</p></div></div>;
   }
 
   return (

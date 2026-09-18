@@ -80,23 +80,23 @@ function verifyPassword(password: string, stored: string) {
   return expected.length === candidate.length && timingSafeEqual(candidate, expected);
 }
 
-export async function createEmailUser(name: string, email: string, password: string) {
+export async function createEmailUser(name: string, username: string, password: string) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const normalizedEmail = email.trim().toLowerCase();
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail)).limit(1);
-  if (existing.length) return { ok: false as const, reason: "email_exists" as const };
+  const normalizedUsername = username.trim().toLowerCase();
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, normalizedUsername)).limit(1);
+  if (existing.length) return { ok: false as const, reason: "username_exists" as const };
   const openId = `email_${randomUUID()}`.slice(0, 64);
-  await db.insert(users).values({ openId, name: name.trim(), email: normalizedEmail, passwordHash: hashPassword(password), loginMethod: "email" });
+  await db.insert(users).values({ openId, name: name.trim(), username: normalizedUsername, email: null, passwordHash: hashPassword(password), loginMethod: "username" });
   const user = await getUserByOpenId(openId);
   return user ? { ok: true as const, user } : { ok: false as const, reason: "create_failed" as const };
 }
 
-export async function authenticateEmailUser(email: string, password: string) {
+export async function authenticateEmailUser(username: string, password: string) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const normalizedEmail = email.trim().toLowerCase();
-  const [user] = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
+  const normalizedUsername = username.trim().toLowerCase();
+  const [user] = await db.select().from(users).where(eq(users.username, normalizedUsername)).limit(1);
   if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) return null;
   await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
   return user;

@@ -5,7 +5,7 @@ describe("Link4Sub reward flow", () => {
   it("uses the configured level URLs", () => {
     expect(REWARD_TIERS.level1.url).toBe("https://link4sub.com/FhoKDghRKt");
     expect(REWARD_TIERS.level2.url).toBe("https://link4sub.com/CzJAqmN7dl");
-    expect(REWARD_TIERS.link4m.url).toBe("https://link4m.co/st?api=6aaa2d910aef892dca0a0bf8&url=https://lumenrewards-8fsahncj.manus.space");
+    expect(REWARD_TIERS.link4m.url).toBe("https://link4m.co/st?api=6aaa2d910aef892dca0a0bf8&url=https://vexzstudio-jrsg.onrender.com/");
   });
 
   it("exposes positive rewards and a bounded completion wait", () => {
