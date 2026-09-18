@@ -100,7 +100,8 @@ export async function markRewardAttemptReturned(userId: number, token: string) {
   const [attempt] = await db.select().from(rewardAttempts).where(and(eq(rewardAttempts.userId, userId), eq(rewardAttempts.token, token))).limit(1);
   if (!attempt || attempt.completedAt) return { returned: false, reason: "invalid_attempt" as const };
   await db.update(rewardAttempts).set({ returnedAt: new Date() }).where(eq(rewardAttempts.id, attempt.id));
-  return { returned: true, reason: "returned" as const };
+  const completion = await completeRewardAttempt(userId, token, true);
+  return { ...completion, returned: true, reason: "returned" as const };
 }
 
 export async function completeRewardAttempt(userId: number, token: string, verifiedExternally = false) {
