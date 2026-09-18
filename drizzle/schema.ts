@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -17,6 +17,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  coinBalance: int("coinBalance").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -25,4 +26,29 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const coinTransactions = mysqlTable("coinTransactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  amount: int("amount").notNull(),
+  source: varchar("source", { length: 64 }).notNull(),
+  claimKey: varchar("claimKey", { length: 128 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userClaimKey: uniqueIndex("coinTransactions_user_claim_key").on(table.userId, table.claimKey),
+}));
+
+export type CoinTransaction = typeof coinTransactions.$inferSelect;
+export type InsertCoinTransaction = typeof coinTransactions.$inferInsert;
+
+export const rewardAttempts = mysqlTable("rewardAttempts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  tier: mysqlEnum("tier", ["level1", "level2", "link4m"]).notNull(),
+  token: varchar("token", { length: 96 }).notNull().unique(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  returnedAt: timestamp("returnedAt"),
+  completedAt: timestamp("completedAt"),
+});
+
+export type RewardAttempt = typeof rewardAttempts.$inferSelect;
+export type InsertRewardAttempt = typeof rewardAttempts.$inferInsert;
