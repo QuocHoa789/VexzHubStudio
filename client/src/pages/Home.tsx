@@ -181,7 +181,6 @@ export default function Home() {
   const handleEmailAuth = (event: FormEvent) => {
     event.preventDefault();
     setAuthError(null);
-<<<<<<< HEAD
     if (authPassword.length < 8) {
       setAuthError(`Mật khẩu hiện có ${authPassword.length} ký tự; cần ít nhất 8 ký tự.`);
       return;
@@ -189,11 +188,6 @@ export default function Home() {
     verifyCaptchaBefore(() => {
       if (authMode === "signup") {
         emailSignupMutation.mutate({ name: authName.trim(), email: authEmail.trim(), password: authPassword, captchaToken: captchaQuery.data!.token, captchaAnswer: captchaAnswer.trim() }, { onSuccess: (result) => { if (result.ok) window.location.reload(); else setAuthError(result.reason === "captcha_failed" ? "Captcha chưa đúng, vui lòng thử lại." : "Email này đã tồn tại hoặc không thể tạo tài khoản."); }, onError: (error) => setAuthError(error.message.includes("password") ? "Mật khẩu phải có ít nhất 8 ký tự." : "Không thể tạo tài khoản. Kiểm tra email, họ tên và captcha." ) });
-=======
-    verifyCaptchaBefore(() => {
-      if (authMode === "signup") {
-        emailSignupMutation.mutate({ name: authName.trim(), email: authEmail.trim(), password: authPassword, captchaToken: captchaQuery.data!.token, captchaAnswer: captchaAnswer.trim() }, { onSuccess: (result) => { if (result.ok) window.location.reload(); else setAuthError(result.reason === "captcha_failed" ? "Captcha chưa đúng, vui lòng thử lại." : "Email này đã tồn tại hoặc không thể tạo tài khoản."); }, onError: () => setAuthError("Không thể tạo tài khoản. Mật khẩu cần tối thiểu 8 ký tự.") });
->>>>>>> origin/main
       } else {
         emailLoginMutation.mutate({ email: authEmail.trim(), password: authPassword, captchaToken: captchaQuery.data!.token, captchaAnswer: captchaAnswer.trim() }, { onSuccess: (result) => { if (!result.ok) setAuthError(result.reason === "captcha_failed" ? "Captcha chưa đúng, vui lòng thử lại." : "Email hoặc mật khẩu không đúng."); else window.location.reload(); }, onError: () => setAuthError("Đăng nhập thất bại, vui lòng thử lại.") });
       }
