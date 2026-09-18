@@ -5,6 +5,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
+import { createCaptcha, createCaptchaProof, verifyCaptcha } from "./captcha";
 
 const rewardTierInput = z.object({ tier: z.enum(["level1", "level2", "link4m", "layma"]) });
 
@@ -12,14 +13,22 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    emailSignup: publicProcedure.input(z.object({ name: z.string().min(2).max(80), email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+    captchaChallenge: publicProcedure.query(() => createCaptcha()),
+    verifyCaptcha: publicProcedure.input(z.object({ token: z.string().min(20), answer: z.string().regex(/^\d+$/) })).mutation(({ ctx, input }) => {
+      if (!verifyCaptcha(input.token, input.answer)) return { ok: false as const };
+      ctx.res.cookie("lumen_captcha", createCaptchaProof(), { ...getSessionCookieOptions(ctx.req), maxAge: 10 * 60 * 1000 });
+      return { ok: true as const };
+    }),
+    emailSignup: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: z.string().trim().email(), password: z.string().min(8).max(128), captchaToken: z.string().min(20), captchaAnswer: z.string().regex(/^\d+$/) })).mutation(async ({ ctx, input }) => {
+      if (!verifyCaptcha(input.captchaToken, input.captchaAnswer)) return { ok: false as const, reason: "captcha_failed" as const };
       const result = await createEmailUser(input.name, input.email, input.password);
       if (!result.ok) return result;
       const token = await sdk.signSession({ openId: result.user.openId, appId: "local-email", name: result.user.name || input.name });
       ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: 1000 * 60 * 60 * 24 * 365 });
       return { ok: true as const };
     }),
-    emailLogin: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+    emailLogin: publicProcedure.input(z.object({ email: z.string().trim().email(), password: z.string().min(8).max(128), captchaToken: z.string().min(20), captchaAnswer: z.string().regex(/^\d+$/) })).mutation(async ({ ctx, input }) => {
+      if (!verifyCaptcha(input.captchaToken, input.captchaAnswer)) return { ok: false as const, reason: "captcha_failed" as const };
       const user = await authenticateEmailUser(input.email, input.password);
       if (!user) return { ok: false as const, reason: "invalid_credentials" as const };
       const token = await sdk.signSession({ openId: user.openId, appId: "local-email", name: user.name || input.email });
