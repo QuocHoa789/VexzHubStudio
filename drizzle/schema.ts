@@ -15,6 +15,7 @@ export const users = mysqlTable("users", {
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  passwordHash: varchar("passwordHash", { length: 128 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   coinBalance: int("coinBalance").default(0).notNull(),
@@ -43,7 +44,7 @@ export type InsertCoinTransaction = typeof coinTransactions.$inferInsert;
 export const rewardAttempts = mysqlTable("rewardAttempts", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  tier: mysqlEnum("tier", ["level1", "level2", "link4m"]).notNull(),
+  tier: mysqlEnum("tier", ["level1", "level2", "link4m", "layma"]).notNull(),
   token: varchar("token", { length: 96 }).notNull().unique(),
   startedAt: timestamp("startedAt").defaultNow().notNull(),
   returnedAt: timestamp("returnedAt"),

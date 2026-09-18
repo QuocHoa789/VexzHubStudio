@@ -1,16 +1,31 @@
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { getAdminOverview, getCoinDashboard, completeRewardAttempt, cancelRewardAttempt, getLeaderboard, markRewardAttemptReturned, startRewardAttempt } from "./db";
+import { authenticateEmailUser, createEmailUser, getAdminOverview, getCoinDashboard, completeRewardAttempt, cancelRewardAttempt, getLeaderboard, markRewardAttemptReturned, startRewardAttempt } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { sdk } from "./_core/sdk";
 
-const rewardTierInput = z.object({ tier: z.enum(["level1", "level2", "link4m"]) });
+const rewardTierInput = z.object({ tier: z.enum(["level1", "level2", "link4m", "layma"]) });
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    emailSignup: publicProcedure.input(z.object({ name: z.string().min(2).max(80), email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+      const result = await createEmailUser(input.name, input.email, input.password);
+      if (!result.ok) return result;
+      const token = await sdk.signSession({ openId: result.user.openId, appId: "local-email", name: result.user.name || input.name });
+      ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: 1000 * 60 * 60 * 24 * 365 });
+      return { ok: true as const };
+    }),
+    emailLogin: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(8).max(128) })).mutation(async ({ ctx, input }) => {
+      const user = await authenticateEmailUser(input.email, input.password);
+      if (!user) return { ok: false as const, reason: "invalid_credentials" as const };
+      const token = await sdk.signSession({ openId: user.openId, appId: "local-email", name: user.name || input.email });
+      ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: 1000 * 60 * 60 * 24 * 365 });
+      return { ok: true as const };
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

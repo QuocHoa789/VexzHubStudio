@@ -99,6 +99,16 @@ const missions: Mission[] = [
     tone: "amber",
     status: "ready",
   },
+  {
+    id: "layma",
+    tier: "layma",
+    title: "Layma · nhiệm vụ riêng",
+    description: "Hoàn tất nhiệm vụ Layma rồi quay lại để tự động cộng coin.",
+    reward: REWARD_TIERS.layma.reward,
+    icon: Gift,
+    tone: "amber",
+    status: "ready",
+  },
 ];
 
 function formatCoins(value: number) {
@@ -118,6 +128,8 @@ export default function Home() {
   const markReturnedMutation = trpc.rewards.markReturned.useMutation();
   const cancelAttemptMutation = trpc.rewards.cancelAttempt.useMutation();
   const completeAttemptMutation = trpc.rewards.completeAttempt.useMutation();
+  const emailLoginMutation = trpc.auth.emailLogin.useMutation();
+  const emailSignupMutation = trpc.auth.emailSignup.useMutation();
   const [activeNav, setActiveNav] = useState("Overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -137,7 +149,23 @@ export default function Home() {
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [activityExpanded, setActivityExpanded] = useState(false);
-  const [cooldowns, setCooldowns] = useState<Record<RewardTier, number>>({ level1: 0, level2: 0, link4m: 0 });
+  const [coinPopup, setCoinPopup] = useState<{ amount: number; label: string } | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const handleEmailAuth = (event: FormEvent) => {
+    event.preventDefault();
+    setAuthError(null);
+    if (authMode === "signup") {
+      emailSignupMutation.mutate({ name: authName, email: authEmail, password: authPassword }, { onSuccess: (result) => { if (result.ok) window.location.reload(); else setAuthError("Email này đã tồn tại hoặc không thể tạo tài khoản."); }, onError: () => setAuthError("Không thể tạo tài khoản. Mật khẩu cần tối thiểu 8 ký tự.") });
+    } else {
+      emailLoginMutation.mutate({ email: authEmail, password: authPassword }, { onSuccess: (result) => { if (!result.ok) setAuthError("Email hoặc mật khẩu không đúng."); else window.location.reload(); }, onError: () => setAuthError("Đăng nhập thất bại, vui lòng thử lại.") });
+    }
+  };
+  const [cooldowns, setCooldowns] = useState<Record<RewardTier, number>>({ level1: 0, level2: 0, link4m: 0, layma: 0 });
 
   useEffect(() => {
     if (!user?.id) return;
@@ -163,6 +191,10 @@ export default function Home() {
           if ("accepted" in result && result.accepted) {
             setCoins(result.balance);
             if (result.claimed) setClaims((current) => [{ id: Date.now(), title: REWARD_TIERS[returnedTier].label, reward: result.reward ?? REWARD_TIERS[returnedTier].reward, time: "Just now" }, ...current]);
+            if (result.claimed) {
+              setCoinPopup({ amount: result.reward ?? REWARD_TIERS[returnedTier].reward, label: REWARD_TIERS[returnedTier].label });
+              window.setTimeout(() => setCoinPopup(null), 4500);
+            }
             setMissionState((current) => ({ ...current, [returnedTier === "link4m" ? "link4m" : `link4sub-${returnedTier}`]: "claimed" }));
             setActiveMissionId(null);
             setAttemptToken(null);
@@ -223,7 +255,7 @@ export default function Home() {
     }
   }, [user?.id]);
 
-  const availableCoins = (Object.keys(REWARD_TIERS) as RewardTier[]).reduce((total, tier) => total + (rewardsQuery.data?.todayClaimedByTier[tier] ? 0 : REWARD_TIERS[tier].reward), 0);
+  const availableCoins = (Object.keys(REWARD_TIERS) as RewardTier[]).reduce((total, tier) => total + Math.max(0, 4 - (rewardsQuery.data?.todayClaimsByTier[tier] ?? 0)) * REWARD_TIERS[tier].reward, 0);
   const claimedCount = rewardsQuery.data?.totalClaims ?? 0;
   const totalEarned = rewardsQuery.data?.totalEarned ?? 0;
 
@@ -256,6 +288,10 @@ export default function Home() {
         setCoins(result.balance);
         setMissionState((current) => ({ ...current, [activeMissionId]: "claimed" }));
         if (result.claimed) setClaims((current) => [{ id: Date.now(), title: REWARD_TIERS[selectedTier].label, reward: result.reward ?? REWARD_TIERS[selectedTier].reward, time: "Just now" }, ...current]);
+        if (result.claimed) {
+          setCoinPopup({ amount: result.reward ?? REWARD_TIERS[selectedTier].reward, label: REWARD_TIERS[selectedTier].label });
+          window.setTimeout(() => setCoinPopup(null), 4500);
+        }
         setActiveMissionId(null);
         setAttemptToken(null);
         window.sessionStorage.removeItem(`lumen:reward-attempt:${user?.id}`);
@@ -345,11 +381,12 @@ export default function Home() {
   }
 
   if (!user) {
-    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#08090d] px-5 text-slate-100"><div className="pointer-events-none absolute inset-0"><div className="aurora aurora-violet" /><div className="aurora aurora-cyan" /><div className="grid-noise absolute inset-0 opacity-[0.025]" /></div><div className="relative w-full max-w-md rounded-3xl border border-white/[0.1] bg-[#111219]/90 p-7 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-9"><div className="flex items-center gap-3"><div className="brand-mark flex h-10 w-10 items-center justify-center rounded-xl text-[#0b0c11]"><Sparkles className="h-5 w-5 fill-current" /></div><div><p className="font-display text-base font-bold text-white">lumen</p><p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-500">rewards system</p></div></div><div className="mt-10"><p className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Private rewards workspace</p><h1 className="font-display text-3xl font-semibold tracking-[-0.05em] text-white">Make every action count<span className="text-violet-300">.</span></h1><p className="mt-3 text-sm leading-relaxed text-slate-500">Sign in to earn coins, unlock rewards and see your position on the leaderboard.</p></div><div className="mt-8 space-y-3"><button onClick={() => startLogin()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-[12px] font-bold text-[#0c0d12] transition-colors hover:bg-violet-100"><LogIn className="h-4 w-4" /> Log in</button><button onClick={() => startLogin()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.03] text-[12px] font-semibold text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"><Sparkles className="h-4 w-4 text-violet-300" /> Sign up free</button></div><p className="mt-6 text-center text-[10px] leading-relaxed text-slate-600">Authentication is securely handled by Manus. New users are automatically provisioned a rewards account.</p></div></div>;
+    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#08090d] px-5 text-slate-100"><div className="pointer-events-none absolute inset-0"><div className="aurora aurora-violet" /><div className="aurora aurora-cyan" /><div className="grid-noise absolute inset-0 opacity-[0.025]" /></div><div className="relative w-full max-w-md rounded-3xl border border-white/[0.1] bg-[#111219]/90 p-7 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-9"><div className="flex items-center gap-3"><div className="brand-mark flex h-10 w-10 items-center justify-center rounded-xl text-[#0b0c11]"><Sparkles className="h-5 w-5 fill-current" /></div><div><p className="font-display text-base font-bold text-white">lumen</p><p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-500">rewards system</p></div></div><div className="mt-10"><p className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Private rewards workspace</p><h1 className="font-display text-3xl font-semibold tracking-[-0.05em] text-white">Make every action count<span className="text-violet-300">.</span></h1><p className="mt-3 text-sm leading-relaxed text-slate-500">Đăng nhập để nhận coin và theo dõi lịch sử nhiệm vụ.</p></div><div className="mt-8 space-y-3"><button onClick={() => startLogin()} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-[12px] font-bold text-[#0c0d12] transition-colors hover:bg-violet-100"><LogIn className="h-4 w-4" /> Tiếp tục với Google</button><div className="flex rounded-xl border border-white/[0.08] bg-white/[0.02] p-1"><button onClick={() => setAuthMode("login")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "login" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng nhập</button><button onClick={() => setAuthMode("signup")} className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${authMode === "signup" ? "bg-violet-300 text-[#14111e]" : "text-slate-500"}`}>Đăng ký</button></div><form onSubmit={handleEmailAuth} className="space-y-2">{authMode === "signup" && <input value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Họ tên" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />}<input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="Email" required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" /><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Mật khẩu (tối thiểu 8 ký tự)" minLength={8} required className="h-11 w-full rounded-xl border border-white/[0.1] bg-white/[0.04] px-3 text-sm text-white outline-none placeholder:text-slate-600" />{authError && <p className="text-[10px] text-rose-300">{authError}</p>}<button type="submit" className="flex h-11 w-full items-center justify-center rounded-xl bg-violet-300 text-[12px] font-bold text-[#14111e] hover:bg-violet-200">{authMode === "login" ? "Đăng nhập bằng email" : "Tạo tài khoản"}</button></form></div><p className="mt-6 text-center text-[10px] leading-relaxed text-slate-600">Google dùng Manus OAuth; email và mật khẩu được hash server-side.</p></div></div>;
   }
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#08090d] text-slate-100 selection:bg-violet-400/30">
+      {coinPopup && <div className="fixed right-5 top-5 z-[80] flex items-center gap-3 rounded-2xl border border-emerald-300/25 bg-[#10251f] px-4 py-3 shadow-2xl shadow-emerald-950/40"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-300 text-[#07130f]"><Coins className="h-4 w-4" /></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300">Coin added</p><p className="mt-0.5 text-sm font-bold text-white">+{coinPopup.amount} coins · {coinPopup.label}</p></div><button onClick={() => setCoinPopup(null)} className="ml-2 text-slate-500 hover:text-white" aria-label="Close"><X className="h-4 w-4" /></button></div>}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="aurora aurora-violet" />
         <div className="aurora aurora-cyan" />

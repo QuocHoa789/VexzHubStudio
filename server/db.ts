@@ -1,6 +1,6 @@
 import { and, count, desc, eq, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { coinTransactions, InsertUser, rewardAttempts, users } from "../drizzle/schema";
 import { DAILY_LINK_SOURCE, getRemainingWaitSeconds, REWARD_TIERS, type RewardTier } from "@shared/rewards";
 import { ENV } from "./_core/env";
@@ -67,17 +67,58 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
+}
+
+function verifyPassword(password: string, stored: string) {
+  const [salt, hex] = stored.split(":");
+  if (!salt || !hex) return false;
+  const candidate = scryptSync(password, salt, 64);
+  const expected = Buffer.from(hex, "hex");
+  return expected.length === candidate.length && timingSafeEqual(candidate, expected);
+}
+
+export async function createEmailUser(name: string, email: string, password: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const normalizedEmail = email.trim().toLowerCase();
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail)).limit(1);
+  if (existing.length) return { ok: false as const, reason: "email_exists" as const };
+  const openId = `email_${randomUUID()}`.slice(0, 64);
+  await db.insert(users).values({ openId, name: name.trim(), email: normalizedEmail, passwordHash: hashPassword(password), loginMethod: "email" });
+  const user = await getUserByOpenId(openId);
+  return user ? { ok: true as const, user } : { ok: false as const, reason: "create_failed" as const };
+}
+
+export async function authenticateEmailUser(email: string, password: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const normalizedEmail = email.trim().toLowerCase();
+  const [user] = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
+  if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) return null;
+  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
+  return user;
+}
+
 export async function getCoinDashboard(userId: number) {
   const db = await getDb();
-  if (!db) return { balance: 0, transactions: [], todayClaimed: false, todayClaimedByTier: { level1: false, level2: false, link4m: false }, totalEarned: 0, totalClaims: 0, lastClaimAt: null };
+  if (!db) return { balance: 0, transactions: [], todayClaimed: false, todayClaimedByTier: { level1: false, level2: false, link4m: false, layma: false }, todayClaimsByTier: { level1: 0, level2: 0, link4m: 0, layma: 0 }, totalEarned: 0, totalClaims: 0, lastClaimAt: null };
   const dateKey = new Date().toISOString().slice(0, 10);
   const [user] = await db.select({ coinBalance: users.coinBalance }).from(users).where(eq(users.id, userId)).limit(1);
   const transactions = await db.select({ id: coinTransactions.id, amount: coinTransactions.amount, source: coinTransactions.source, createdAt: coinTransactions.createdAt }).from(coinTransactions).where(eq(coinTransactions.userId, userId)).orderBy(desc(coinTransactions.createdAt)).limit(10);
   const [todayLevel1] = await db.select({ id: coinTransactions.id }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), eq(coinTransactions.claimKey, `${DAILY_LINK_SOURCE}:level1:${dateKey}`))).limit(1);
   const [todayLevel2] = await db.select({ id: coinTransactions.id }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), eq(coinTransactions.claimKey, `${DAILY_LINK_SOURCE}:level2:${dateKey}`))).limit(1);
   const [todayLink4m] = await db.select({ id: coinTransactions.id }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), eq(coinTransactions.claimKey, `link4m:link4m:${dateKey}`))).limit(1);
+  const todayRows = await db.select({ claimKey: coinTransactions.claimKey }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), sql`${coinTransactions.claimKey} LIKE ${`%:${dateKey}%`}`));
+  const todayClaimsByTier = { level1: 0, level2: 0, link4m: 0, layma: 0 };
+  todayRows.forEach(({ claimKey }) => {
+    const tier = claimKey.split(":")[1] as keyof typeof todayClaimsByTier;
+    if (tier in todayClaimsByTier) todayClaimsByTier[tier] += 1;
+  });
   const [stats] = await db.select({ totalEarned: sum(coinTransactions.amount), totalClaims: count(coinTransactions.id) }).from(coinTransactions).where(eq(coinTransactions.userId, userId));
-  return { balance: user?.coinBalance ?? 0, transactions, todayClaimed: Boolean(todayLevel1 || todayLevel2 || todayLink4m), todayClaimedByTier: { level1: Boolean(todayLevel1), level2: Boolean(todayLevel2), link4m: Boolean(todayLink4m) }, totalEarned: Number(stats?.totalEarned ?? 0), totalClaims: Number(stats?.totalClaims ?? 0), lastClaimAt: transactions[0]?.createdAt ?? null };
+  return { balance: user?.coinBalance ?? 0, transactions, todayClaimed: Object.values(todayClaimsByTier).some(Boolean), todayClaimedByTier: { level1: todayClaimsByTier.level1 >= 4, level2: todayClaimsByTier.level2 >= 4, link4m: todayClaimsByTier.link4m >= 4, layma: todayClaimsByTier.layma >= 4 }, todayClaimsByTier, totalEarned: Number(stats?.totalEarned ?? 0), totalClaims: Number(stats?.totalClaims ?? 0), lastClaimAt: transactions[0]?.createdAt ?? null };
 }
 
 export async function startRewardAttempt(userId: number, tier: RewardTier) {
@@ -122,8 +163,10 @@ export async function completeRewardAttempt(userId: number, token: string, verif
   if (!verifiedExternally && !attempt.returnedAt) return { claimed: false, accepted: false, reason: "not_returned" as const, balance: user?.coinBalance ?? 0 };
   if (retryAfterSeconds > 0 && !verifiedExternally) return { claimed: false, accepted: false, reason: "too_early" as const, retryAfterSeconds, balance: user?.coinBalance ?? 0 };
   const dateKey = new Date().toISOString().slice(0, 10);
-  const source = attempt.tier === "link4m" ? "link4m" : DAILY_LINK_SOURCE;
-  const claimKey = `${source}:${attempt.tier}:${dateKey}`;
+  const source = attempt.tier === "link4m" ? "link4m" : attempt.tier === "layma" ? "layma" : DAILY_LINK_SOURCE;
+  const existingToday = await db.select({ claimKey: coinTransactions.claimKey }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), sql`${coinTransactions.claimKey} LIKE ${`${source}:${attempt.tier}:${dateKey}:%`}`));
+  if (existingToday.length >= 4) return { claimed: false, accepted: false, reason: "daily_limit" as const, balance: user?.coinBalance ?? 0 };
+  const claimKey = `${source}:${attempt.tier}:${dateKey}:${existingToday.length + 1}`;
   const [existing] = await db.select({ id: coinTransactions.id }).from(coinTransactions).where(and(eq(coinTransactions.userId, userId), eq(coinTransactions.claimKey, claimKey))).limit(1);
   if (existing) {
     await db.update(rewardAttempts).set({ completedAt: new Date() }).where(eq(rewardAttempts.id, attempt.id));
@@ -155,11 +198,11 @@ export async function getLeaderboard(limit = 20) {
 
 export async function getAdminOverview() {
   const db = await getDb();
-  if (!db) return { metrics: { totalUsers: 0, totalCoins: 0, totalClaims: 0, openAttempts: 0, flaggedUsers: 0 }, claims: [], fraudSignals: [] };
+  if (!db) return { metrics: { totalUsers: 0, totalCoins: 0, totalClaims: 0, openAttempts: 0, flaggedUsers: 0 }, claims: [], fraudSignals: [], attemptStats: { success: 0, failed: 0, open: 0, successRate: 0 } };
   const [userStats] = await db.select({ totalUsers: count(users.id), totalCoins: sum(users.coinBalance) }).from(users);
   const [claimStats] = await db.select({ totalClaims: count(coinTransactions.id) }).from(coinTransactions);
   const claims = await db.select({ id: coinTransactions.id, userId: coinTransactions.userId, userName: users.name, userEmail: users.email, amount: coinTransactions.amount, source: coinTransactions.source, claimKey: coinTransactions.claimKey, createdAt: coinTransactions.createdAt }).from(coinTransactions).innerJoin(users, eq(users.id, coinTransactions.userId)).orderBy(desc(coinTransactions.createdAt)).limit(40);
-  const attempts = await db.select({ id: rewardAttempts.id, userId: rewardAttempts.userId, userName: users.name, userEmail: users.email, tier: rewardAttempts.tier, token: rewardAttempts.token, startedAt: rewardAttempts.startedAt, completedAt: rewardAttempts.completedAt }).from(rewardAttempts).innerJoin(users, eq(users.id, rewardAttempts.userId)).orderBy(desc(rewardAttempts.startedAt)).limit(150);
+  const attempts = await db.select({ id: rewardAttempts.id, userId: rewardAttempts.userId, userName: users.name, userEmail: users.email, tier: rewardAttempts.tier, token: rewardAttempts.token, startedAt: rewardAttempts.startedAt, returnedAt: rewardAttempts.returnedAt, completedAt: rewardAttempts.completedAt }).from(rewardAttempts).innerJoin(users, eq(users.id, rewardAttempts.userId)).orderBy(desc(rewardAttempts.startedAt)).limit(150);
   const now = Date.now();
   const recent = attempts.filter((attempt) => now - new Date(attempt.startedAt).getTime() <= 15 * 60 * 1000);
   const counts = new Map<number, number>();
@@ -167,5 +210,8 @@ export async function getAdminOverview() {
   const incompleteCounts = new Map<number, number>();
   attempts.filter((attempt) => !attempt.completedAt && now - new Date(attempt.startedAt).getTime() <= 24 * 60 * 60 * 1000).forEach((attempt) => incompleteCounts.set(attempt.userId, (incompleteCounts.get(attempt.userId) ?? 0) + 1));
   const fraudSignals = attempts.filter((attempt) => (counts.get(attempt.userId) ?? 0) >= 4 || (incompleteCounts.get(attempt.userId) ?? 0) >= 3).slice(0, 30).map((attempt) => ({ id: attempt.id, userId: attempt.userId, userName: attempt.userName || "Lumen member", userEmail: attempt.userEmail || "", tier: attempt.tier, startedAt: attempt.startedAt, completed: Boolean(attempt.completedAt), signal: (counts.get(attempt.userId) ?? 0) >= 4 ? "Nhiều attempt trong 15 phút" : "Nhiều attempt chưa hoàn tất trong 24 giờ" }));
-  return { metrics: { totalUsers: Number(userStats?.totalUsers ?? 0), totalCoins: Number(userStats?.totalCoins ?? 0), totalClaims: Number(claimStats?.totalClaims ?? 0), openAttempts: attempts.filter((attempt) => !attempt.completedAt).length, flaggedUsers: new Set(fraudSignals.map((signal) => signal.userId)).size }, claims, fraudSignals };
+  const success = attempts.filter((attempt) => Boolean(attempt.completedAt && attempt.returnedAt)).length;
+  const failed = attempts.filter((attempt) => Boolean(attempt.completedAt && !attempt.returnedAt)).length;
+  const open = attempts.filter((attempt) => !attempt.completedAt).length;
+  return { metrics: { totalUsers: Number(userStats?.totalUsers ?? 0), totalCoins: Number(userStats?.totalCoins ?? 0), totalClaims: Number(claimStats?.totalClaims ?? 0), openAttempts: open, flaggedUsers: new Set(fraudSignals.map((signal) => signal.userId)).size }, claims, fraudSignals, attemptStats: { success, failed, open, successRate: success + failed ? Math.round((success / (success + failed)) * 100) : 0 } };
 }

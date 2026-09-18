@@ -12,4 +12,9 @@ describe("reward attempt verification", () => {
     expect(REWARD_TIERS.level1.url).not.toBe(REWARD_TIERS.level2.url);
     expect(REWARD_TIERS.level2.reward).toBeGreaterThan(REWARD_TIERS.level1.reward);
   });
+
+  it("includes the Layma mission", () => {
+    expect(REWARD_TIERS.layma.url).toBe("https://layma.net/3ZJTpKlNy");
+    expect(REWARD_TIERS.layma.reward).toBe(14);
+  });
 });
