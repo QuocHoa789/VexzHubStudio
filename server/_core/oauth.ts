@@ -4,6 +4,7 @@ import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
+import { verifyCaptchaProof } from "../captcha";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -27,6 +28,10 @@ export function registerOAuthRoutes(app: Express) {
     const expectedNonce = parseCookieHeader(req.headers.cookie ?? "")[OAUTH_STATE_COOKIE];
     if (!nonce || nonce !== expectedNonce) {
       res.status(403).json({ error: "invalid oauth state" });
+      return;
+    }
+    if (!verifyCaptchaProof(parseCookieHeader(req.headers.cookie ?? "")["lumen_captcha"])) {
+      res.status(403).json({ error: "captcha verification required" });
       return;
     }
     res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
