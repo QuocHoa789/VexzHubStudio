@@ -272,7 +272,6 @@ export default function Home() {
 
   const handleStartMission = (mission: Mission) => {
     if (rewardsQuery.data?.todayClaimedByTier[mission.tier] || startAttemptMutation.isPending || activeMissionId) return;
-    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
     setClaimError(null);
     setHasReturned(false);
     leftPageRef.current = false;
@@ -284,11 +283,9 @@ export default function Home() {
         setActiveMissionId(mission.id);
         setCountdown(REWARD_TIERS[attempt.tier].waitSeconds);
         window.sessionStorage.setItem(`lumen:reward-attempt:${user?.id}`, JSON.stringify({ token: attempt.token, tier: attempt.tier, startedAt: Date.now() }));
-        if (popup) popup.location.href = attempt.url;
-        else window.open(attempt.url, "_blank", "noopener,noreferrer");
+        window.location.assign(attempt.url);
       },
       onError: () => {
-        popup?.close();
         setClaimError("Không thể tạo attempt. Hãy thử lại sau.");
       },
     });
