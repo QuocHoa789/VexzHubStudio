@@ -2,6 +2,16 @@
 
 ## Database
 
+## Required authentication secret
+
+The server signs login-session cookies with `JWT_SECRET`. If this variable is missing or empty, login will fail with an error such as **“Key of length zero is not supported.”** Set it in the deployment provider's environment-variable settings; do not put the real value in Git.
+
+Generate a value with:
+
+```bash
+openssl rand -base64 48
+```
+
 The application uses **MongoDB** through the official `mongodb` Node.js driver. The database connection is lazy and collections/indexes are initialized on the first database request.
 
 Configure these environment variables:

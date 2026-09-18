@@ -152,7 +152,10 @@ class SDKServer {
   }
 
   private getSessionSecret() {
-    const secret = ENV.cookieSecret;
+    const secret = ENV.cookieSecret.trim();
+    if (!secret) {
+      throw new Error("JWT_SECRET is required and must not be empty. Set a random secret in the deployment environment.");
+    }
     return new TextEncoder().encode(secret);
   }
 
